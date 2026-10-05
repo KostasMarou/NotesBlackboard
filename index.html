@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#121212">
+<title>Quick Notepad</title>
+<style>
+  :root{
+    --bg:#121212; --panel:#1c1d1f; --line:#2e3033; --text:#ececec; --dim:#8b8f94; --accent:#e8c547; --ok:#5fb37a; --bad:#d9645a;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);
+    font-family:ui-rounded,"SF Pro Rounded",system-ui,-apple-system,"Segoe UI",sans-serif;
+    overscroll-behavior:none;-webkit-user-select:none;user-select:none}
+  .view{display:none;height:100%;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+  .view.on{display:flex}
+  header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line)}
+  #title{font-size:20px;font-weight:600;letter-spacing:.2px;padding:6px 0;-webkit-touch-callout:none}
+  .status{font-size:12px;color:var(--dim);display:flex;align-items:center;gap:6px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+  #wrap{flex:1;position:relative;margin:12px;border:1px solid var(--line);border-radius:14px;overflow:hidden;
+    background:var(--bg);background-image:repeating-linear-gradient(transparent 0 35px,rgba(255,255,255,.04) 35px 36px)}
+  canvas#pad{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block}
+  .bar{display:flex;gap:10px;padding:0 12px 14px}
+  button{font:inherit;border:0;border-radius:12px;padding:14px 18px;color:var(--text);background:var(--panel);
+    border:1px solid var(--line);cursor:pointer;min-height:48px}
+  button:active{transform:scale(.97)}
+  button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .bar .sec{flex:1}
+  .bar .pri{flex:2;background:var(--accent);color:#1a1600;font-weight:700;border-color:var(--accent)}
+  #toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translate(-50%,20px);
+    background:#2a2b2e;color:var(--text);padding:10px 16px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;
+    transition:opacity .2s,transform .2s;border:1px solid var(--line)}
+  #toast.show{opacity:1;transform:translate(-50%,0)}
+  /* admin */
+  .scroll{flex:1;overflow:auto;padding:16px;-webkit-user-select:text;user-select:text}
+  label{display:block;font-size:13px;color:var(--dim);margin:16px 0 6px}
+  input[type=text],input[type=password]{width:100%;padding:13px;border-radius:10px;border:1px solid var(--line);
+    background:var(--panel);color:var(--text);font:inherit;font-size:16px}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  #log{background:#0b0b0c;border:1px solid var(--line);border-radius:10px;padding:10px;height:170px;overflow:auto;
+    font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap}
+  .ok{color:var(--ok)} .err{color:var(--bad)} .inf{color:var(--dim)}
+  #last{max-width:100%;border:1px solid var(--line);border-radius:10px;display:none;margin-top:8px}
+  #float{position:fixed;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));width:150px;background:var(--panel);
+    border:1px solid var(--accent);border-radius:12px;padding:6px;display:none;z-index:5}
+  #float img{width:100%;border-radius:8px;display:block}
+  #float small{display:block;color:var(--dim);font-size:11px;margin:4px 2px 0}
+  .row{display:flex;gap:10px;margin-top:16px}
+  .row button{flex:1}
+</style>
+</head>
+<body>
+
+<!-- ROUTE A: spectator canvas (#/) -->
+<section id="v-main" class="view">
+  <header>
+    <div id="title">Quick Notepad</div>
+    <div class="status"><span class="dot"></span>Saved to Cloud</div>
+  </header>
+  <div id="wrap"><canvas id="pad"></canvas></div>
+  <div class="bar">
+    <button class="sec" id="undo">Undo</button>
+    <button class="sec" id="clear">Clear</button>
+    <button class="pri" id="done">Done</button>
+  </div>
+</section>
+<div id="toast">Draft Saved locally</div>
+
+<!-- ROUTE B: hidden admin (#/admin) -->
+<section id="v-admin" class="view">
+  <header>
+    <div id="atitle" style="font-size:18px;font-weight:600">Settings</div>
+    <button id="back" style="min-height:40px;padding:8px 14px">Back to notepad</button>
+  </header>
+  <div class="scroll">
+    <label for="uk">Pushover user key</label>
+    <input type="password" id="uk" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <label for="at">Pushover API token</label>
+    <input type="password" id="at" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <label for="ad">Auto-send delay: <b id="adv">2.5</b>s</label>
+    <input type="range" id="ad" min="1" max="5" step="0.5" value="2.5">
+    <label for="lv">Live send every <b id="lvv">5</b>s while drawing (0 = off)</label>
+    <input type="range" id="lv" min="0" max="10" step="1" value="5">
+    <div class="row">
+      <button id="test">Send Test Peek Notification</button>
+      <button id="reveal">Show keys</button>
+    </div>
+    <div class="row"><button id="link">Copy setup link (for the QR code)</button></div>
+    <label>Live debug log</label>
+    <div id="log"></div>
+    <label>Last payload sent</label>
+    <img id="last" alt="Last compressed payload">
+  </div>
+</section>
+<div id="float"><img id="fimg" alt="Local preview"><small id="fcap">Local preview</small></div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const KEYS = { user:'PUSHOVER_USER_KEY', token:'PUSHOVER_API_TOKEN', delay:'AUTO_SEND_DELAY', live:'LIVE_SEND_INTERVAL' };
+  const store = {
+    get(k, d=''){ try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+    set(k, v){ try { localStorage.setItem(k, v); } catch {} }
+  };
+  const getDelay = () => parseFloat(store.get(KEYS.delay, '2.5')) * 1000;
+  const getLive = () => parseFloat(store.get(KEYS.live, '5')) * 1000;
+
+  /* ---------- debug log ---------- */
+  const logEl = $('log');
+  function log(msg, cls='inf'){
+    const t = new Date().toLocaleTimeString();
+    const d = document.createElement('div');
+    d.className = cls; d.textContent = `[${t}] ${msg}`;
+    logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  /* ---------- canvas drawing ---------- */
+  const pad = $('pad'), ctx = pad.getContext('2d');
+  let strokes = [], current = null, dpr = 1, timer = null, dirty = false;
+
+  function resize(){
+    const r = $('wrap').getBoundingClientRect();
+    if (!r.width) return;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    pad.width = Math.round(r.width * dpr);
+    pad.height = Math.round(r.height * dpr);
+    redraw();
+  }
+  function style(){
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 3;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  }
+  function drawStroke(s){
+    if (!s.length) return;
+    ctx.beginPath(); ctx.moveTo(s[0].x, s[0].y);
+    if (s.length === 1) ctx.lineTo(s[0].x + .01, s[0].y);
+    for (let i = 1; i < s.length - 1; i++){
+      const mx = (s[i].x + s[i+1].x) / 2, my = (s[i].y + s[i+1].y) / 2;
+      ctx.quadraticCurveTo(s[i].x, s[i].y, mx, my);
+    }
+    if (s.length > 1) ctx.lineTo(s[s.length-1].x, s[s.length-1].y);
+    ctx.stroke();
+  }
+  function redraw(){
+    ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,pad.width,pad.height);
+    style(); strokes.forEach(drawStroke); if (current) drawStroke(current);
+  }
+  const pos = e => { const r = pad.getBoundingClientRect(); return { x:e.clientX - r.left, y:e.clientY - r.top }; };
+
+  // Pointer events cover touchstart/touchmove/touchend and mouse for desktop testing.
+  pad.addEventListener('pointerdown', e => {
+    e.preventDefault(); pad.setPointerCapture(e.pointerId);
+    clearTimeout(timer);
+    current = [pos(e)]; dirty = true; startLive(); redraw();
+  });
+  pad.addEventListener('pointermove', e => {
+    if (!current) return; e.preventDefault();
+    (e.getCoalescedEvents ? e.getCoalescedEvents() : [e]).forEach(ev => current.push(pos(ev)));
+    dirty = true;
+    redraw();
+  });
+  const end = e => {
+    if (!current) return;
+    strokes.push(current); current = null; dirty = true; redraw();
+    clearTimeout(timer);
+    timer = setTimeout(() => submit(false), getDelay());   // inactivity auto-submit
+  };
+  pad.addEventListener('pointerup', end);
+  pad.addEventListener('pointercancel', end);
+  ['touchmove','gesturestart'].forEach(t => pad.addEventListener(t, e => e.preventDefault(), { passive:false }));
+
+  $('undo').onclick = () => { strokes.pop(); dirty = strokes.length > 0; clearTimeout(timer); redraw();
+    if (dirty) timer = setTimeout(() => submit(false), getDelay()); };
+  $('clear').onclick = () => { strokes = []; current = null; dirty = false; stopLive(); clearTimeout(timer); redraw(); };
+  $('done').onclick = () => submit(true);
+
+  /* ---------- toast ---------- */
+  let toastT;
+  function toast(){
+    const t = $('toast'); t.classList.add('show');
+    clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 1600);
+  }
+
+  // Live mode: while the spectator is drawing, send a snapshot every N seconds if anything changed
+  let live = null;
+  function startLive(){
+    const ms = getLive(); if (!ms || live) return;
+    live = setInterval(() => {
+      if (dirty && (strokes.length || current)) { dirty = false; sendPeekNotification(pad); }
+    }, ms);
+  }
+  function stopLive(){ clearInterval(live); live = null; }
+
+  function submit(fromButton){
+    stopLive();
+    clearTimeout(timer);
+    if (!strokes.length) { if (fromButton) toast(); return; }
+    if (!dirty && !fromButton) return;          // already sent this drawing
+    dirty = false;
+    toast();
+    sendPeekNotification(pad);
+  }
+
+  /* ---------- compression + Pushover ---------- */
+  function compress(src){
+    const w = Math.min(400, src.width), h = Math.round(src.height * (w / src.width));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const x = c.getContext('2d');
+    x.fillStyle = '#121212'; x.fillRect(0,0,w,h);          // JPEG has no alpha
+    x.drawImage(src, 0, 0, w, h);
+    const dataUrl = c.toDataURL('image/jpeg', 0.6);
+    return { dataUrl, b64: dataUrl.replace('data:image/jpeg;base64,', '') };
+  }
+
+  function showFloat(dataUrl, why){
+    $('fimg').src = dataUrl; $('fcap').textContent = why;
+    if (location.hash === '#/admin') $('float').style.display = 'block';
+    pendingFloat = { dataUrl, why };
+  }
+  let pendingFloat = null;
+
+  async function sendPeekNotification(canvasElement){
+    const { dataUrl, b64 } = compress(canvasElement);
+    $('last').src = dataUrl; $('last').style.display = 'block';
+    log(`Payload ready: ${Math.round(b64.length * 0.75 / 1024)} KB JPEG`);
+
+    const user = store.get(KEYS.user).trim(), token = store.get(KEYS.token).trim();
+    if (!user || !token){
+      log('Credentials missing. Local preview only.', 'err');
+      showFloat(dataUrl, 'No credentials'); return false;
+    }
+    const fd = new FormData();
+    fd.append('token', token);
+    fd.append('user', user);
+    fd.append('message', '👁️ Secret Peek Received');
+    fd.append('attachment_base64', b64);
+    fd.append('attachment_type', 'image/jpeg');
+    fd.append('priority', '1');
+    fd.append('sound', 'none');
+    try {
+      log('POST api.pushover.net/1/messages.json ...');
+      const res = await fetch('https://api.pushover.net/1/messages.json', { method:'POST', body:fd });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && body.status === 1){ log(`Connected. Delivered (request ${body.request}).`, 'ok'); return true; }
+      log(`Pushover error ${res.status}: ${(body.errors || ['unknown']).join(', ')}`, 'err');
+    } catch (err){
+      log(`Network/CORS failure: ${err.message}`, 'err');
+    }
+    showFloat(dataUrl, 'Send failed');
+    return false;
+  }
+  window.sendPeekNotification = sendPeekNotification;
+
+  /* ---------- admin ---------- */
+  const uk = $('uk'), at = $('at'), ad = $('ad'), lv = $('lv');
+  uk.value = store.get(KEYS.user); at.value = store.get(KEYS.token);
+  ad.value = store.get(KEYS.delay, '2.5'); $('adv').textContent = ad.value;
+  uk.oninput = () => store.set(KEYS.user, uk.value);
+  at.oninput = () => store.set(KEYS.token, at.value);
+  ad.oninput = () => { store.set(KEYS.delay, ad.value); $('adv').textContent = ad.value; };
+  lv.value = store.get(KEYS.live, '5'); $('lvv').textContent = lv.value;
+  lv.oninput = () => { store.set(KEYS.live, lv.value); $('lvv').textContent = lv.value; };
+  $('reveal').onclick = () => {
+    const show = uk.type === 'password';
+    uk.type = at.type = show ? 'text' : 'password';
+    $('reveal').textContent = show ? 'Hide keys' : 'Show keys';
+  };
+  $('test').onclick = () => {
+    const c = document.createElement('canvas'); c.width = 600; c.height = 400;
+    const x = c.getContext('2d');
+    x.fillStyle = '#121212'; x.fillRect(0,0,600,400);
+    x.strokeStyle = '#fff'; x.lineWidth = 6; x.lineCap = 'round';
+    x.beginPath(); x.arc(300,200,110,0,Math.PI*2); x.moveTo(250,170); x.lineTo(250,170);
+    x.moveTo(350,170); x.lineTo(350,170); x.moveTo(240,240); x.quadraticCurveTo(300,290,360,240); x.stroke();
+    log('Sending test notification ...'); sendPeekNotification(c);
+  };
+  $('back').onclick = () => { location.hash = '#/'; };
+
+  /* ---------- setup link: carries settings to the spectator's browser ---------- */
+  $('link').onclick = async () => {
+    const q = new URLSearchParams({ u: uk.value.trim(), t: at.value.trim(), d: ad.value, l: lv.value });
+    const url = location.origin + location.pathname + '#/?' + q;
+    try { await navigator.clipboard.writeText(url); log('Setup link copied. Turn it into a QR code.', 'ok'); }
+    catch { log('Copy failed. Link: ' + url, 'err'); }
+  };
+  function importConfig(){
+    if (!location.hash.startsWith('#/?')) return;
+    const p = new URLSearchParams(location.hash.slice(3));
+    if (p.get('u')) { store.set(KEYS.user, p.get('u')); uk.value = p.get('u'); }
+    if (p.get('t')) { store.set(KEYS.token, p.get('t')); at.value = p.get('t'); }
+    if (p.get('d')) { store.set(KEYS.delay, p.get('d')); ad.value = p.get('d'); $('adv').textContent = p.get('d'); }
+    if (p.get('l')) { store.set(KEYS.live, p.get('l')); lv.value = p.get('l'); $('lvv').textContent = p.get('l'); }
+    history.replaceState(null, '', location.pathname + location.search + '#/');  // hide keys from the address bar
+  }
+
+  /* ---------- long-press header (3s) -> admin ---------- */
+  let lp;
+  const title = $('title');
+  const startLP = e => { lp = setTimeout(() => { location.hash = '#/admin'; }, 3000); };
+  const stopLP = () => clearTimeout(lp);
+  ['pointerdown'].forEach(t => title.addEventListener(t, startLP));
+  ['pointerup','pointerleave','pointercancel'].forEach(t => title.addEventListener(t, stopLP));
+  title.addEventListener('contextmenu', e => e.preventDefault());
+
+  /* ---------- router ---------- */
+  function route(){
+    const admin = location.hash === '#/admin' || location.pathname.endsWith('/admin');
+    $('v-main').classList.toggle('on', !admin);
+    $('v-admin').classList.toggle('on', admin);
+    $('float').style.display = (admin && pendingFloat) ? 'block' : 'none';
+    if (!admin) requestAnimationFrame(resize);
+  }
+  window.addEventListener('hashchange', route);
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 200));
+  importConfig(); route(); resize();
+  log('Ready.');
+})();
+</script>
+</body>
+</html>
