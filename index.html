@@ -198,10 +198,9 @@
   function submit(fromButton){
     stopLive();
     clearTimeout(timer);
-    if (!strokes.length) { if (fromButton) toast(); return; }
+    if (!strokes.length) return;
     if (!dirty && !fromButton) return;          // already sent this drawing
     dirty = false;
-    toast();
     sendPeekNotification(pad);
   }
 
